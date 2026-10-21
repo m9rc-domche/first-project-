@@ -1,0 +1,92 @@
+name: Render video
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: "Script de la vidéo"
+        required: true
+        default: "What if you had 500 IQ and decided to disappear? Your phone was smashed into a thousand pieces. But someone was already watching. So you ran into the forest."
+
+      voice:
+        description: "Voix : auto, piper, espeak ou flite"
+        required: true
+        default: "auto"
+
+      lang:
+        description: "Langue : en ou fr"
+        required: true
+        default: "en"
+
+      fix:
+        description: "Correction optionnelle, ex: scene 2: camera=track"
+        required: false
+        default: ""
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Télécharger le projet
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les outils système
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libcairo2 espeak-ng
+
+      - name: Installer les dépendances Python
+        run: |
+          pip install -r requirements.txt
+          pip install piper-tts || true
+
+      - name: Télécharger une voix Piper
+        run: |
+          mkdir -p voices
+
+          if [ "${{ inputs.lang }}" = "fr" ]; then
+            VOICE_PATH="fr/fr_FR/siwis/medium/fr_FR-siwis-medium"
+          else
+            VOICE_PATH="en/en_US/ryan/high/en_US-ryan-high"
+          fi
+
+          curl -L \
+            "https://huggingface.co/rhasspy/piper-voices/resolve/main/${VOICE_PATH}.onnx" \
+            -o voices/voice.onnx
+
+          curl -L \
+            "https://huggingface.co/rhasspy/piper-voices/resolve/main/${VOICE_PATH}.onnx.json" \
+            -o voices/voice.onnx.json
+
+          echo "PIPER_MODEL=$GITHUB_WORKSPACE/voices/voice.onnx" >> "$GITHUB_ENV"
+
+      - name: Préparer le script
+        env:
+          USER_SCRIPT: ${{ inputs.script }}
+        run: |
+          printf '%s' "$USER_SCRIPT" > script.txt
+
+      - name: Générer la vidéo
+        env:
+          VOICE: ${{ inputs.voice }}
+          FIX: ${{ inputs.fix }}
+        run: |
+          mkdir -p output
+
+          python automotion.py script.txt \
+            --output output/video.mp4 \
+            --tts "$VOICE" \
+            --fix "$FIX"
+
+      - name: Publier la vidéo
+        uses: actions/upload-artifact@v4
+        with:
+          name: videos
+          path: output/video.mp4
